@@ -1,0 +1,44 @@
+name: Build Shinobi ZimaOS Image
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * *"
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE_NAME: ghcr.io/kaanaldemir/shinobi-zimaos
+  SHINOBI_BRANCH: dev
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Shinobi from official Docker recipe
+        uses: docker/build-push-action@v6
+        with:
+          context: https://gitlab.com/Shinobi-Systems/ShinobiDocker.git#master
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:latest
+            ${{ env.IMAGE_NAME }}:dev
+          build-args: |
+            SHINOBI_BRANCH=${{ env.SHINOBI_BRANCH }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/kaanaldemir/shinobi-zimaos-image
+            org.opencontainers.image.description=Fresh Shinobi image for ZimaOS Custom App installs
