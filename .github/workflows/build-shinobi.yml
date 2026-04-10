@@ -2,8 +2,17 @@ name: Build Shinobi ZimaOS Image
 
 on:
   workflow_dispatch:
+    inputs:
+      force:
+        description: "Build even if upstream Shinobi dev has not changed"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
   schedule:
-    - cron: "0 3 * * *"
+    - cron: "0 3 * * 0"
 
 permissions:
   contents: read
@@ -12,9 +21,79 @@ permissions:
 env:
   IMAGE_NAME: ghcr.io/kaanaldemir/shinobi-zimaos
   SHINOBI_BRANCH: dev
+  SHINOBI_REPO: Shinobi-Systems/Shinobi
 
 jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.decide.outputs.should_build }}
+      upstream_sha: ${{ steps.upstream.outputs.sha }}
+      upstream_short_sha: ${{ steps.upstream.outputs.short_sha }}
+      existing_sha: ${{ steps.existing.outputs.sha }}
+
+    steps:
+      - name: Get upstream Shinobi commit
+        id: upstream
+        run: |
+          set -euo pipefail
+          sha="$(git ls-remote https://gitlab.com/${SHINOBI_REPO}.git refs/heads/${SHINOBI_BRANCH} | awk '{print $1}')"
+          if [ -z "$sha" ]; then
+            echo "Failed to resolve upstream commit" >&2
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "short_sha=${sha:0:12}" >> "$GITHUB_OUTPUT"
+          echo "Upstream ${SHINOBI_BRANCH}: $sha"
+
+      - name: Read current image source revision
+        id: existing
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          token="$(curl -fsSL "https://ghcr.io/token?scope=repository:kaanaldemir/shinobi-zimaos:pull" | jq -r '.token')"
+          manifest="$(curl -fsSL \
+            -H "Authorization: Bearer ${token}" \
+            -H "Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json" \
+            "https://ghcr.io/v2/kaanaldemir/shinobi-zimaos/manifests/latest")"
+          media_type="$(jq -r '.mediaType // empty' <<< "$manifest")"
+          if jq -e '.manifests' >/dev/null <<< "$manifest"; then
+            digest="$(jq -r '.manifests[] | select((.platform.os == "linux") and (.platform.architecture == "amd64")) | .digest' <<< "$manifest" | head -n1)"
+            manifest="$(curl -fsSL \
+              -H "Authorization: Bearer ${token}" \
+              -H "Accept: application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json" \
+              "https://ghcr.io/v2/kaanaldemir/shinobi-zimaos/manifests/${digest}")"
+          fi
+          config_digest="$(jq -r '.config.digest' <<< "$manifest")"
+          config="$(curl -fsSL -H "Authorization: Bearer ${token}" "https://ghcr.io/v2/kaanaldemir/shinobi-zimaos/blobs/${config_digest}")"
+          sha="$(jq -r '.config.Labels["org.opencontainers.image.revision"] // empty' <<< "$config")"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "Current image revision: ${sha:-none}"
+
+      - name: Decide whether to build
+        id: decide
+        run: |
+          set -euo pipefail
+          force="${{ github.event.inputs.force || 'false' }}"
+          upstream="${{ steps.upstream.outputs.sha }}"
+          existing="${{ steps.existing.outputs.sha }}"
+          if [ "$force" = "true" ]; then
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+            echo "Forced build requested."
+          elif [ -z "$existing" ]; then
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+            echo "No existing image revision label found. Building."
+          elif [ "$upstream" != "$existing" ]; then
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+            echo "Upstream changed. Building."
+          else
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+            echo "No upstream change. Skipping build."
+          fi
+
   build:
+    needs: check
+    if: needs.check.outputs.should_build == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -42,3 +121,5 @@ jobs:
           labels: |
             org.opencontainers.image.source=https://github.com/kaanaldemir/shinobi-zimaos-image
             org.opencontainers.image.description=Fresh Shinobi image for ZimaOS Custom App installs
+            org.opencontainers.image.revision=${{ needs.check.outputs.upstream_sha }}
+            org.opencontainers.image.version=${{ env.SHINOBI_BRANCH }}-${{ needs.check.outputs.upstream_short_sha }}
