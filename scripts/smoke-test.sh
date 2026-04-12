@@ -1,18 +1,32 @@
 #!/bin/bash
 set -euo pipefail
 
-ffmpeg -hide_banner -version >/dev/null
-ffmpeg -hide_banner -version | grep -q -- '--enable-libvpl'
-if ffmpeg -hide_banner -version | grep -q -- '--enable-libmfx'; then
+ffmpeg_version="$(ffmpeg -hide_banner -version)"
+echo "$ffmpeg_version" >/dev/null
+if ! grep -q -- '--enable-libvpl' <<< "$ffmpeg_version"; then
+  echo "FFmpeg is missing --enable-libvpl"
+  exit 1
+fi
+if grep -q -- '--enable-libmfx' <<< "$ffmpeg_version"; then
   echo "Unexpected libmfx-enabled ffmpeg. Expected libvpl build."
   exit 1
 fi
-ffmpeg -hide_banner -hwaccels | grep -q '^vaapi$'
-ffmpeg -hide_banner -hwaccels | grep -q '^qsv$'
-ffmpeg -hide_banner -encoders | grep -q 'h264_qsv'
-ffmpeg -hide_banner -encoders | grep -q 'hevc_qsv'
-ffmpeg -hide_banner -encoders | grep -q 'h264_vaapi'
-ffmpeg -hide_banner -encoders | grep -q 'hevc_vaapi'
+hwaccels="$(ffmpeg -hide_banner -hwaccels)"
+encoders="$(ffmpeg -hide_banner -encoders)"
+if ! grep -q '^vaapi$' <<< "$hwaccels"; then
+  echo "Missing vaapi hwaccel"
+  exit 1
+fi
+if ! grep -q '^qsv$' <<< "$hwaccels"; then
+  echo "Missing qsv hwaccel"
+  exit 1
+fi
+for encoder in h264_qsv hevc_qsv h264_vaapi hevc_vaapi; do
+  if ! grep -q "$encoder" <<< "$encoders"; then
+    echo "Missing encoder $encoder"
+    exit 1
+  fi
+done
 
 dpkg -l | grep -q 'intel-media-va-driver'
 dpkg -l | grep -q 'libvpl2'
