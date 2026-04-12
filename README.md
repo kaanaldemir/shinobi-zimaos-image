@@ -8,6 +8,12 @@ This repository now does three separate things:
 - builds a local `Dockerfile` instead of blindly rebuilding remote `ShinobiDocker`
 - smoke-tests Intel acceleration support before publishing
 
+Schedule:
+
+- runs daily at 03:00 UTC / 06:00 Istanbul
+- also supports manual `workflow_dispatch`
+- uses a single workflow with concurrency control to avoid overlapping builds
+
 Published image:
 
 - `ghcr.io/kaanaldemir/shinobi-zimaos:latest`

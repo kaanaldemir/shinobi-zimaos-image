@@ -12,7 +12,11 @@ on:
           - "false"
           - "true"
   schedule:
-    - cron: "0 3 * * 0"
+    - cron: "0 3 * * *"
+
+concurrency:
+  group: build-shinobi-zimaos-image
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -26,6 +30,7 @@ env:
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     outputs:
       should_build: ${{ steps.decide.outputs.should_build }}
       upstream_sha: ${{ steps.upstream.outputs.sha }}
@@ -94,6 +99,7 @@ jobs:
     needs: check
     if: needs.check.outputs.should_build == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 60
 
     steps:
       - name: Checkout repository
