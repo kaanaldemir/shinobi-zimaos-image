@@ -28,6 +28,10 @@ for encoder in h264_qsv hevc_qsv h264_vaapi hevc_vaapi; do
   fi
 done
 
-dpkg -l | grep -q 'intel-media-va-driver'
-dpkg -l | grep -q 'libvpl2'
-dpkg -l | grep -q 'vainfo'
+packages="$(dpkg -l)"
+for package in intel-media-va-driver libvpl2 vainfo; do
+  if ! grep -q "$package" <<< "$packages"; then
+    echo "Missing package $package"
+    exit 1
+  fi
+done
