@@ -105,6 +105,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Preflight scripts
+        run: |
+          set -euo pipefail
+          bash -n entrypoint.sh
+          bash -n scripts/smoke-test.sh
+          bash -n scripts/test-intel-runtime.sh
+          grep -q -- '--entrypoint /bin/bash' .github/workflows/build-shinobi.yml
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -121,6 +129,8 @@ jobs:
           context: .
           load: true
           tags: shinobi-zimaos:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
           build-args: |
             SHINOBI_BRANCH=${{ env.SHINOBI_BRANCH }}
             SHINOBI_COMMIT=${{ needs.check.outputs.upstream_sha }}
@@ -133,6 +143,8 @@ jobs:
         with:
           context: .
           push: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
           tags: |
             ${{ env.IMAGE_NAME }}:latest
             ${{ env.IMAGE_NAME }}:dev
