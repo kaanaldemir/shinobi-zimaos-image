@@ -10,7 +10,7 @@ This repository now does three separate things:
 
 Schedule:
 
-- runs daily at 03:00 UTC / 06:00 Istanbul
+- runs weekly on Sunday at 03:00 UTC / 06:00 Istanbul
 - also supports manual `workflow_dispatch`
 - uses a single workflow with concurrency control to avoid overlapping builds
 
