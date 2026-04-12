@@ -126,7 +126,7 @@ jobs:
             SHINOBI_COMMIT=${{ needs.check.outputs.upstream_sha }}
 
       - name: Run smoke test
-        run: docker run --rm shinobi-zimaos:test /scripts/smoke-test.sh
+        run: docker run --rm --entrypoint /bin/bash shinobi-zimaos:test /scripts/smoke-test.sh
 
       - name: Push image
         uses: docker/build-push-action@v6
