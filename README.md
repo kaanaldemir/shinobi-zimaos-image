@@ -7,6 +7,7 @@ This repository now does three separate things:
 - watches upstream `Shinobi` `dev` for changes
 - builds a local `Dockerfile` instead of blindly rebuilding remote `ShinobiDocker`
 - smoke-tests Intel acceleration support before publishing
+- builds FFmpeg with `--enable-libvpl` for Linux Intel QSV work instead of relying on Debian's prebuilt `--enable-libmfx` package build
 
 Schedule:
 
@@ -35,6 +36,7 @@ Included validation:
 
 - static smoke test in CI: [`scripts/smoke-test.sh`](./scripts/smoke-test.sh)
 - host-side Intel runtime test for `/dev/dri` environments: [`scripts/test-intel-runtime.sh`](./scripts/test-intel-runtime.sh)
+- optional real QSV transcode check on target hardware with `TEST_RTSP_URL=... /scripts/test-intel-runtime.sh`
 
 Important limitation:
 

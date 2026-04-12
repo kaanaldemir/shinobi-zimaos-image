@@ -2,6 +2,11 @@
 set -euo pipefail
 
 ffmpeg -hide_banner -version >/dev/null
+ffmpeg -hide_banner -version | grep -q -- '--enable-libvpl'
+if ffmpeg -hide_banner -version | grep -q -- '--enable-libmfx'; then
+  echo "Unexpected libmfx-enabled ffmpeg. Expected libvpl build."
+  exit 1
+fi
 ffmpeg -hide_banner -hwaccels | grep -q '^vaapi$'
 ffmpeg -hide_banner -hwaccels | grep -q '^qsv$'
 ffmpeg -hide_banner -encoders | grep -q 'h264_qsv'
@@ -10,5 +15,5 @@ ffmpeg -hide_banner -encoders | grep -q 'h264_vaapi'
 ffmpeg -hide_banner -encoders | grep -q 'hevc_vaapi'
 
 dpkg -l | grep -q 'intel-media-va-driver'
-dpkg -l | grep -q 'libmfx1'
+dpkg -l | grep -q 'libvpl2'
 dpkg -l | grep -q 'vainfo'
