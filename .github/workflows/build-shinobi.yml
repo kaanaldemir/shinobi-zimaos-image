@@ -3,6 +3,14 @@ name: Build Shinobi ZimaOS Image
 on:
   workflow_dispatch:
     inputs:
+      channel:
+        description: "Publish channel"
+        required: false
+        default: "stable"
+        type: choice
+        options:
+          - "stable"
+          - "experimental"
       force:
         description: "Build even if upstream Shinobi dev has not changed"
         required: false
@@ -36,6 +44,9 @@ jobs:
       upstream_sha: ${{ steps.upstream.outputs.sha }}
       upstream_short_sha: ${{ steps.upstream.outputs.short_sha }}
       existing_sha: ${{ steps.existing.outputs.sha }}
+      publish_tags: ${{ steps.channel.outputs.publish_tags }}
+      manifest_tag: ${{ steps.channel.outputs.manifest_tag }}
+      patch_profile: ${{ steps.channel.outputs.patch_profile }}
 
     steps:
       - name: Get upstream Shinobi commit
@@ -51,6 +62,32 @@ jobs:
           echo "short_sha=${sha:0:12}" >> "$GITHUB_OUTPUT"
           echo "Upstream ${SHINOBI_BRANCH}: $sha"
 
+      - name: Resolve channel
+        id: channel
+        run: |
+          set -euo pipefail
+          channel="${{ github.event.inputs.channel || 'stable' }}"
+          if [ "$channel" = "experimental" ]; then
+            echo "manifest_tag=experimental" >> "$GITHUB_OUTPUT"
+            echo "patch_profile=experimental-event-audio" >> "$GITHUB_OUTPUT"
+            {
+              echo "publish_tags<<EOF"
+              echo "${IMAGE_NAME}:experimental"
+              echo "${IMAGE_NAME}:experimental-sha-${{ steps.upstream.outputs.short_sha }}"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo "manifest_tag=latest" >> "$GITHUB_OUTPUT"
+            echo "patch_profile=stable" >> "$GITHUB_OUTPUT"
+            {
+              echo "publish_tags<<EOF"
+              echo "${IMAGE_NAME}:latest"
+              echo "${IMAGE_NAME}:dev"
+              echo "${IMAGE_NAME}:sha-${{ steps.upstream.outputs.short_sha }}"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Read current image source revision
         id: existing
         continue-on-error: true
@@ -60,7 +97,7 @@ jobs:
           manifest="$(curl -fsSL \
             -H "Authorization: Bearer ${token}" \
             -H "Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json" \
-            "https://ghcr.io/v2/kaanaldemir/shinobi-zimaos/manifests/latest")"
+            "https://ghcr.io/v2/kaanaldemir/shinobi-zimaos/manifests/${{ steps.channel.outputs.manifest_tag }}")"
           if jq -e '.manifests' >/dev/null <<< "$manifest"; then
             digest="$(jq -r '.manifests[] | select((.platform.os == "linux") and (.platform.architecture == "amd64")) | .digest' <<< "$manifest" | head -n1)"
             manifest="$(curl -fsSL \
@@ -134,6 +171,7 @@ jobs:
           build-args: |
             SHINOBI_BRANCH=${{ env.SHINOBI_BRANCH }}
             SHINOBI_COMMIT=${{ needs.check.outputs.upstream_sha }}
+            PATCH_PROFILE=${{ needs.check.outputs.patch_profile }}
 
       - name: Run smoke test
         run: docker run --rm --entrypoint /bin/bash shinobi-zimaos:test /scripts/smoke-test.sh
@@ -145,13 +183,11 @@ jobs:
           push: true
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          tags: |
-            ${{ env.IMAGE_NAME }}:latest
-            ${{ env.IMAGE_NAME }}:dev
-            ${{ env.IMAGE_NAME }}:sha-${{ needs.check.outputs.upstream_short_sha }}
+          tags: ${{ needs.check.outputs.publish_tags }}
           build-args: |
             SHINOBI_BRANCH=${{ env.SHINOBI_BRANCH }}
             SHINOBI_COMMIT=${{ needs.check.outputs.upstream_sha }}
+            PATCH_PROFILE=${{ needs.check.outputs.patch_profile }}
           labels: |
             org.opencontainers.image.source=https://github.com/kaanaldemir/shinobi-zimaos-image
             org.opencontainers.image.description=Fresh Shinobi image for ZimaOS Custom App installs

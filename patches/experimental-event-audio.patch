@@ -1,0 +1,47 @@
+diff --git a/libs/events/utils.js b/libs/events/utils.js
+index a71162b..d99f3cd 100644
+--- a/libs/events/utils.js
++++ b/libs/events/utils.js
+@@ -670,17 +670,15 @@ module.exports = (s,config,lang) => {
+                 }
+                 //-t 00:'+s.timeObject(new Date(detector_timeout * 1000 * 60)).format('mm:ss')+'
+                 if(
+-                    audioCodec &&
+-                    audioCodec !== 'no' &&
+-                    audioCodec !== 'auto' &&
+-                    audioCodec !== 'aac'
++                    !noAudio
+                 ){
+-                    outputMap += `-map 0:1 `
++                    outputMap += `-map 0:1? `
+                 }
+                 if(config.noEventBasedRecordingMaps)outputMap = '';
+                 const secondsBefore = parseInt(monitorDetails.detector_buffer_seconds_before) || 5
+                 let LiveStartIndex = parseInt(secondsBefore / 2 + 1)
+-                const ffmpegCommand = `-threads 1 -loglevel warning -live_start_index -${LiveStartIndex} -analyzeduration ${analyzeDuration} -probesize ${probeSize} -re -i "${s.dir.streams+groupKey+'/'+monitorId}/detectorStream.m3u8" ${outputMap}-movflags faststart -fflags +genpts+igndts -c:v copy ${noAudio ? '-an' : autoAudio ? '' : `-c:a aac`} -strict -2 -strftime 1 -y "${s.getVideoDirectory(monitorConfig) + filename}"`
++                const audioFlags = noAudio ? '-an' : autoAudio || audioCodec === 'copy' ? '-c:a copy' : `-c:a ${audioCodec}`
++                const ffmpegCommand = `-threads 1 -loglevel warning -live_start_index -${LiveStartIndex} -analyzeduration ${analyzeDuration} -probesize ${probeSize} -re -i "${s.dir.streams+groupKey+'/'+monitorId}/detectorStream.m3u8" ${outputMap}-movflags faststart -fflags +genpts+igndts -c:v copy ${audioFlags} -strict -2 -strftime 1 -y "${s.getVideoDirectory(monitorConfig) + filename}"`
+                 s.debugLog(ffmpegCommand)
+                 activeMonitor.eventBasedRecording[fileTime].process = spawn(
+                     config.ffmpegDir,
+diff --git a/libs/ffmpeg/builders.js b/libs/ffmpeg/builders.js
+index 1fcf203..02e8015 100644
+--- a/libs/ffmpeg/builders.js
++++ b/libs/ffmpeg/builders.js
+@@ -727,7 +727,15 @@ module.exports = (s,config,lang) => {
+             const secondsBefore = parseInt(e.details.detector_buffer_seconds_before) || 5
+             let hlsListSize = parseInt(secondsBefore / 2 + 3)
+             // hlsListSize = hlsListSize < 5 ? 5 : hlsListSize;
+-            if(inputMap)outputFlags.push(inputMap)
++            const noAudio = audioCodec === 'no'
++            if(inputMap){
++                outputFlags.push(inputMap)
++            }else{
++                outputFlags.push('-map 0:v:0')
++                if(!noAudio){
++                    outputFlags.push('-map 0:a:0?')
++                }
++            }
+             if(e.details.cust_sip_record)outputFlags.push(e.details.cust_sip_record)
+             if(videoCodec === 'auto'){
+                 if(e.type === 'h264' || e.type === 'hls' || e.type === 'mp4'){
