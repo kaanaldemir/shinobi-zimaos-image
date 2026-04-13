@@ -6,11 +6,12 @@ on:
       channel:
         description: "Publish channel"
         required: false
-        default: "stable"
+        default: "both"
         type: choice
         options:
           - "stable"
           - "experimental"
+          - "both"
       force:
         description: "Build even if upstream Shinobi dev has not changed"
         required: false
@@ -40,13 +41,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     outputs:
-      should_build: ${{ steps.decide.outputs.should_build }}
       upstream_sha: ${{ steps.upstream.outputs.sha }}
       upstream_short_sha: ${{ steps.upstream.outputs.short_sha }}
-      existing_sha: ${{ steps.existing.outputs.sha }}
-      publish_tags: ${{ steps.channel.outputs.publish_tags }}
-      manifest_tag: ${{ steps.channel.outputs.manifest_tag }}
-      patch_profile: ${{ steps.channel.outputs.patch_profile }}
+      build_stable: ${{ steps.decide.outputs.build_stable }}
+      build_experimental: ${{ steps.decide.outputs.build_experimental }}
 
     steps:
       - name: Get upstream Shinobi commit
@@ -62,42 +60,28 @@ jobs:
           echo "short_sha=${sha:0:12}" >> "$GITHUB_OUTPUT"
           echo "Upstream ${SHINOBI_BRANCH}: $sha"
 
-      - name: Resolve channel
+      - name: Resolve requested channels
         id: channel
         run: |
           set -euo pipefail
-          channel="${{ github.event.inputs.channel || 'stable' }}"
-          if [ "$channel" = "experimental" ]; then
-            echo "manifest_tag=experimental" >> "$GITHUB_OUTPUT"
-            echo "patch_profile=experimental-event-audio" >> "$GITHUB_OUTPUT"
-            {
-              echo "publish_tags<<EOF"
-              echo "${IMAGE_NAME}:experimental"
-              echo "${IMAGE_NAME}:experimental-sha-${{ steps.upstream.outputs.short_sha }}"
-              echo "EOF"
-            } >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            channel="both"
           else
-            echo "manifest_tag=latest" >> "$GITHUB_OUTPUT"
-            echo "patch_profile=stable" >> "$GITHUB_OUTPUT"
-            {
-              echo "publish_tags<<EOF"
-              echo "${IMAGE_NAME}:latest"
-              echo "${IMAGE_NAME}:dev"
-              echo "${IMAGE_NAME}:sha-${{ steps.upstream.outputs.short_sha }}"
-              echo "EOF"
-            } >> "$GITHUB_OUTPUT"
+            channel="${{ github.event.inputs.channel || 'both' }}"
           fi
+          echo "channel=${channel}" >> "$GITHUB_OUTPUT"
 
-      - name: Read current image source revision
-        id: existing
+      - name: Read current stable image source revision
+        id: existing_stable
         continue-on-error: true
         run: |
           set -euo pipefail
           token="$(curl -fsSL "https://ghcr.io/token?scope=repository:kaanaldemir/shinobi-zimaos:pull" | jq -r '.token')"
+          tag="latest"
           manifest="$(curl -fsSL \
             -H "Authorization: Bearer ${token}" \
             -H "Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json" \
-            "https://ghcr.io/v2/kaanaldemir/shinobi-zimaos/manifests/${{ steps.channel.outputs.manifest_tag }}")"
+            "https://ghcr.io/v2/kaanaldemir/shinobi-zimaos/manifests/${tag}")"
           if jq -e '.manifests' >/dev/null <<< "$manifest"; then
             digest="$(jq -r '.manifests[] | select((.platform.os == "linux") and (.platform.architecture == "amd64")) | .digest' <<< "$manifest" | head -n1)"
             manifest="$(curl -fsSL \
@@ -109,34 +93,75 @@ jobs:
           config="$(curl -fsSL -H "Authorization: Bearer ${token}" "https://ghcr.io/v2/kaanaldemir/shinobi-zimaos/blobs/${config_digest}")"
           sha="$(jq -r '.config.Labels["org.opencontainers.image.revision"] // empty' <<< "$config")"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
-          echo "Current image revision: ${sha:-none}"
+          echo "Current ${tag} image revision: ${sha:-none}"
 
-      - name: Decide whether to build
+      - name: Read current experimental image source revision
+        id: existing_experimental
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          token="$(curl -fsSL "https://ghcr.io/token?scope=repository:kaanaldemir/shinobi-zimaos:pull" | jq -r '.token')"
+          tag="experimental"
+          manifest="$(curl -fsSL \
+            -H "Authorization: Bearer ${token}" \
+            -H "Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json" \
+            "https://ghcr.io/v2/kaanaldemir/shinobi-zimaos/manifests/${tag}")"
+          if jq -e '.manifests' >/dev/null <<< "$manifest"; then
+            digest="$(jq -r '.manifests[] | select((.platform.os == "linux") and (.platform.architecture == "amd64")) | .digest' <<< "$manifest" | head -n1)"
+            manifest="$(curl -fsSL \
+              -H "Authorization: Bearer ${token}" \
+              -H "Accept: application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json" \
+              "https://ghcr.io/v2/kaanaldemir/shinobi-zimaos/manifests/${digest}")"
+          fi
+          config_digest="$(jq -r '.config.digest' <<< "$manifest")"
+          config="$(curl -fsSL -H "Authorization: Bearer ${token}" "https://ghcr.io/v2/kaanaldemir/shinobi-zimaos/blobs/${config_digest}")"
+          sha="$(jq -r '.config.Labels["org.opencontainers.image.revision"] // empty' <<< "$config")"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "Current ${tag} image revision: ${sha:-none}"
+
+      - name: Decide which channels to build
         id: decide
         run: |
           set -euo pipefail
           force="${{ github.event.inputs.force || 'false' }}"
+          channel="${{ steps.channel.outputs.channel }}"
           upstream="${{ steps.upstream.outputs.sha }}"
-          existing="${{ steps.existing.outputs.sha }}"
-          if [ "$force" = "true" ]; then
-            echo "should_build=true" >> "$GITHUB_OUTPUT"
-            echo "Forced build requested."
-          elif [ -z "$existing" ]; then
-            echo "should_build=true" >> "$GITHUB_OUTPUT"
-            echo "No existing image revision label found. Building."
-          elif [ "$upstream" != "$existing" ]; then
-            echo "should_build=true" >> "$GITHUB_OUTPUT"
-            echo "Upstream changed. Building."
-          else
-            echo "should_build=false" >> "$GITHUB_OUTPUT"
-            echo "No upstream change. Skipping build."
+          existing_stable="${{ steps.existing_stable.outputs.sha }}"
+          existing_experimental="${{ steps.existing_experimental.outputs.sha }}"
+          build_stable=false
+          build_experimental=false
+
+          if [ "$channel" = "stable" ] || [ "$channel" = "both" ]; then
+            if [ "$force" = "true" ] || [ -z "$existing_stable" ] || [ "$upstream" != "$existing_stable" ]; then
+              build_stable=true
+            fi
           fi
+
+          if [ "$channel" = "experimental" ] || [ "$channel" = "both" ]; then
+            if [ "$force" = "true" ] || [ -z "$existing_experimental" ] || [ "$upstream" != "$existing_experimental" ]; then
+              build_experimental=true
+            fi
+          fi
+
+          echo "build_stable=${build_stable}" >> "$GITHUB_OUTPUT"
+          echo "build_experimental=${build_experimental}" >> "$GITHUB_OUTPUT"
+          echo "Requested channel mode: ${channel}"
+          echo "Build stable: ${build_stable}"
+          echo "Build experimental: ${build_experimental}"
 
   build:
     needs: check
-    if: needs.check.outputs.should_build == 'true'
+    if: |
+      needs.check.outputs.build_stable == 'true' ||
+      needs.check.outputs.build_experimental == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        channel:
+          - stable
+          - experimental
 
     steps:
       - name: Checkout repository
@@ -151,43 +176,84 @@ jobs:
           grep -q -- '--entrypoint /bin/bash' .github/workflows/build-shinobi.yml
 
       - name: Set up Docker Buildx
+        if: |
+          (matrix.channel == 'stable' && needs.check.outputs.build_stable == 'true') ||
+          (matrix.channel == 'experimental' && needs.check.outputs.build_experimental == 'true')
         uses: docker/setup-buildx-action@v3
 
       - name: Login to GitHub Container Registry
+        if: |
+          (matrix.channel == 'stable' && needs.check.outputs.build_stable == 'true') ||
+          (matrix.channel == 'experimental' && needs.check.outputs.build_experimental == 'true')
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Resolve matrix channel settings
+        if: |
+          (matrix.channel == 'stable' && needs.check.outputs.build_stable == 'true') ||
+          (matrix.channel == 'experimental' && needs.check.outputs.build_experimental == 'true')
+        id: channel
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.channel }}" = "experimental" ]; then
+            echo "patch_profile=experimental-event-audio" >> "$GITHUB_OUTPUT"
+            {
+              echo "publish_tags<<EOF"
+              echo "${IMAGE_NAME}:experimental"
+              echo "${IMAGE_NAME}:experimental-sha-${{ needs.check.outputs.upstream_short_sha }}"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo "patch_profile=stable" >> "$GITHUB_OUTPUT"
+            {
+              echo "publish_tags<<EOF"
+              echo "${IMAGE_NAME}:latest"
+              echo "${IMAGE_NAME}:dev"
+              echo "${IMAGE_NAME}:sha-${{ needs.check.outputs.upstream_short_sha }}"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Build image for smoke test
+        if: |
+          (matrix.channel == 'stable' && needs.check.outputs.build_stable == 'true') ||
+          (matrix.channel == 'experimental' && needs.check.outputs.build_experimental == 'true')
         uses: docker/build-push-action@v6
         with:
           context: .
           load: true
-          tags: shinobi-zimaos:test
+          tags: shinobi-zimaos:${{ matrix.channel }}-test
           cache-from: type=gha
           cache-to: type=gha,mode=max
           build-args: |
             SHINOBI_BRANCH=${{ env.SHINOBI_BRANCH }}
             SHINOBI_COMMIT=${{ needs.check.outputs.upstream_sha }}
-            PATCH_PROFILE=${{ needs.check.outputs.patch_profile }}
+            PATCH_PROFILE=${{ steps.channel.outputs.patch_profile }}
 
       - name: Run smoke test
-        run: docker run --rm --entrypoint /bin/bash shinobi-zimaos:test /scripts/smoke-test.sh
+        if: |
+          (matrix.channel == 'stable' && needs.check.outputs.build_stable == 'true') ||
+          (matrix.channel == 'experimental' && needs.check.outputs.build_experimental == 'true')
+        run: docker run --rm --entrypoint /bin/bash shinobi-zimaos:${{ matrix.channel }}-test /scripts/smoke-test.sh
 
       - name: Push image
+        if: |
+          (matrix.channel == 'stable' && needs.check.outputs.build_stable == 'true') ||
+          (matrix.channel == 'experimental' && needs.check.outputs.build_experimental == 'true')
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          tags: ${{ needs.check.outputs.publish_tags }}
+          tags: ${{ steps.channel.outputs.publish_tags }}
           build-args: |
             SHINOBI_BRANCH=${{ env.SHINOBI_BRANCH }}
             SHINOBI_COMMIT=${{ needs.check.outputs.upstream_sha }}
-            PATCH_PROFILE=${{ needs.check.outputs.patch_profile }}
+            PATCH_PROFILE=${{ steps.channel.outputs.patch_profile }}
           labels: |
             org.opencontainers.image.source=https://github.com/kaanaldemir/shinobi-zimaos-image
             org.opencontainers.image.description=Fresh Shinobi image for ZimaOS Custom App installs
