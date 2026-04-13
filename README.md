@@ -18,6 +18,7 @@ Schedule:
 Published image:
 
 - `ghcr.io/kaanaldemir/shinobi-zimaos:latest`
+- `ghcr.io/kaanaldemir/shinobi-zimaos:experimental`
 
 Build model:
 
@@ -25,6 +26,7 @@ Build model:
 - upstream branch watched: `dev`
 - upstream commit is pinned into each image build with `SHINOBI_COMMIT`
 - image recipe lives in this repo: [Dockerfile](./Dockerfile)
+- workflow dispatch supports a manual `experimental` channel that applies the event-audio patch during build without changing `latest`
 
 Why this exists:
 

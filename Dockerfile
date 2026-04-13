@@ -54,6 +54,7 @@ ENV LD_LIBRARY_PATH=/opt/ffmpeg/lib
 
 ARG SHINOBI_BRANCH=dev
 ARG SHINOBI_COMMIT=
+ARG PATCH_PROFILE=stable
 
 RUN apt-get update && apt-get install -y \
     curl \
@@ -95,7 +96,12 @@ WORKDIR /home/Shinobi
 
 COPY entrypoint.sh /entrypoint.sh
 COPY scripts/ /scripts/
+COPY patches/ /patches/
 RUN chmod +x /entrypoint.sh /scripts/*.sh
+
+RUN if [ "${PATCH_PROFILE}" != "stable" ]; then \
+      cd /opt/shinobi && git apply "/patches/${PATCH_PROFILE}.patch"; \
+    fi
 
 EXPOSE 8080
 
